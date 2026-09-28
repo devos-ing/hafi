@@ -1,0 +1,19 @@
+# Hafi workflow v1. Account aliases come from `hafi connect`.
+# Remove either source if you only use Gmail or Lark.
+version: 1
+id: reply-review
+sources:
+  - provider: gmail
+    account: personal
+  - provider: lark
+    account: work
+schedule:
+  every_minutes: 5
+filter:
+  bot: jev
+  question: "Does this new message need a personal reply from me?"
+  match_at_or_above: 0.7
+actions:
+  - type: save_reply_draft
+    composer: codex
+    max_words: 120
