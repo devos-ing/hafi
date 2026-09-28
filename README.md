@@ -46,11 +46,16 @@ Requires Bun 1.3 or later, a local Codex CLI, and credentials for the providers 
 
 ```sh
 bun install
+bun run dev help
+bun run dev dev --workflow hafi.workflow.example.yaml
 bun run typecheck
 bun test
 bun run build
 ./dist/hafi help --json
 ```
+
+`bun run dev` runs the CLI from source without watch mode. Pass `dev --workflow <file>` to perform one safe dry-run: it reads and evaluates messages without advancing cursors or saving drafts.
+For machine-readable output through the script, use `bun run --silent dev help --json` to suppress Bun's script banner.
 
 Use `hafi connect jev` to store a Jev API key through local input. Gmail app setup uses `HAFI_GMAIL_CLIENT_ID` and `HAFI_GMAIL_CLIENT_SECRET`; Lark app setup uses `HAFI_LARK_APP_ID`, `HAFI_LARK_APP_SECRET`, and `HAFI_LARK_REDIRECT_URI`. User tokens are stored in the operating system credential store, not in workflow YAML. Keep the app credentials out of committed files.
 

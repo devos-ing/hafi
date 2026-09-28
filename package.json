@@ -5,6 +5,7 @@
   "type": "module",
   "bin": { "hafi": "./src/cli.ts" },
   "scripts": {
+    "dev": "bun src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "build": "bun build --compile ./src/cli.ts --outfile ./dist/hafi --no-compile-autoload-dotenv --no-compile-autoload-bunfig"
