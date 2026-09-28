@@ -104,8 +104,9 @@ For the first schema, accept `schedule.every_minutes` values of 1, 2, 5, 10, 15,
 | npm runtime | [`googleapis`](https://github.com/googleapis/google-api-nodejs-client) | Use Google's official OAuth and Gmail client. |
 | npm runtime | [`@larksuiteoapi/node-sdk`](https://github.com/larksuite/node-sdk) | Use the official Lark SDK for user-authorized personal-chat reads; select the Lark domain explicitly. |
 | npm runtime | [`zod`](https://zod.dev/json-schema) | Validate the YAML workflow and reply JSON, and generate one JSON Schema for Codex. |
+| CLI presentation | [`boxen`](https://github.com/sindresorhus/boxen), [`picocolors`](https://github.com/alexeyraspopov/picocolors) | Use boxen for the compact welcome block and picocolors for human-readable labels; keep the fixed command parser local and avoid a command framework. |
 | Development | `typescript`, `@types/bun` | Run `bunx tsc --noEmit`; Bun does not type-check execution. |
-| Bun built-ins | `Bun.YAML.parse`, `fetch`, `bun:sqlite`, `Bun.secrets`, `Bun.spawn`, `bun:test`, `node:util.parseArgs`, `bun build --compile` | Use these instead of YAML, ORM, keyring, process, CLI, or scheduler packages. |
+| Bun built-ins | `Bun.YAML.parse`, `fetch`, `bun:sqlite`, `Bun.secrets`, `Bun.spawn`, `bun:test`, `bun build --compile` | Prefer built-ins for YAML, local state, secrets, processes, and scheduling. |
 | Codex plugin | Gmail connector is installed in this Codex session. | Optional for inspecting an approved test mailbox during development. The downloaded Hafi executable cannot call it from cron. |
 | Codex plugin | No Lark or Jev connector appeared in plugin search. | Use their official SDK or HTTP API; no new plugin installation is needed. |
 | Optional later | Claude CLI, [`@typesafe-ai/sdk`](https://github.com/typesafe-ai/typesafe-sdk-js), Web UI packages | Add only when a second composer, larger Jev use, or browser interface requires them. |
