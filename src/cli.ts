@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import boxen from "boxen";
+import picocolors from "picocolors";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { closeSync, chmodSync, mkdirSync, openSync } from "node:fs";
@@ -9,6 +11,7 @@ import { openState, readSecret, writeSecret } from "./state";
 import { initWorkflow, loadWorkflow, type Provider } from "./workflow";
 
 type Output = Record<string, unknown>;
+type Colors = ReturnType<typeof picocolors.createColors>;
 
 const exitCodes: Record<string, number> = { CONFIG: 2, SOURCE: 3, JEV: 4, ACTION: 5, RUN_BUSY: 6, INTERNAL: 1 };
 
@@ -39,15 +42,14 @@ function safeDisplay(value: unknown): string {
 }
 
 /** Render structured output as labeled fields and readable records. */
-function renderHuman(result: Output, color: boolean): string {
+function renderHuman(result: Output, colors: Colors): string {
   const label = (key: string) => safeDisplay(key).replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (first) => first.toUpperCase());
-  const paint = (value: string) => color ? `\u001b[36m${value}\u001b[0m` : value;
   const valueText = (value: unknown) => typeof value === "boolean" ? (value ? "yes" : "no") : safeDisplay(value);
   const fields = (record: Record<string, unknown>, indent: number, bullet = false): string[] => {
     const entries = Object.entries(record).filter(([, value]) => value !== undefined);
     return entries.flatMap(([key, value], index) => {
       const prefix = " ".repeat(indent) + (bullet && index === 0 ? "- " : bullet ? "  " : "");
-      const keyLabel = paint(`${label(key)}:`);
+      const keyLabel = colors.cyan(`${label(key)}:`);
       if (Array.isArray(value)) {
         if (value.length && value.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
           return [`${prefix}${keyLabel}`, ...value.flatMap((item) => fields(item as Record<string, unknown>, indent + 2, true))];
@@ -63,22 +65,21 @@ function renderHuman(result: Output, color: boolean): string {
   return fields(result, 0).join("\n");
 }
 
-/** Draw the aligned welcome and command list for human help output. */
-function renderWelcome(color: boolean): string {
-  const width = 38;
-  const line = (plain: string, rendered = plain) => `│ ${rendered}${" ".repeat(width - plain.length)} │`;
-  const title = color ? "\u001b[1;36mHafi\u001b[0m" : "Hafi";
+/** Render a compact welcome block and command list for human help output. */
+function renderWelcome(colors: Colors): string {
+  const banner = boxen(`${colors.bold("Hafi")}\nGo hands-free`, {
+    borderStyle: "round",
+    borderColor: colors.isColorSupported ? "cyan" : undefined,
+    padding: { left: 1, right: 1 },
+  });
   const commands = help.commands.flatMap((row) => [
-    color ? `\u001b[32m${row.command}\u001b[0m` : row.command,
-    `  ${row.effect}`,
+    `  ${colors.green(row.command)}`,
+    `    ${row.effect}`,
   ]);
   return [
-    `┌${"─".repeat(width + 2)}┐`,
-    line("Hafi", title),
-    line("Go hands-free"),
-    `└${"─".repeat(width + 2)}┘`,
+    banner,
     "",
-    color ? "\u001b[1mCOMMANDS\u001b[0m" : "COMMANDS",
+    colors.bold("COMMANDS"),
     ...commands,
   ].join("\n");
 }
@@ -213,14 +214,15 @@ export async function command(args: string[]): Promise<Output> {
 /** Render a CLI result once, keeping JSON stdout free of diagnostics. */
 export async function main(args = process.argv.slice(2)): Promise<number> {
   const json = args.includes("--json");
+  const colors = picocolors.createColors(colorsEnabled());
   try {
     const result = await command(args);
     const failure = result.ok === false ? classifyFailure(String(result.errorCode ?? result.code ?? "INTERNAL")) : null;
     if (failure) result.code = failure;
     const rendered = json ? JSON.stringify(result)
       : typeof result.cron === "string" ? result.cron
-      : result.name === "hafi" ? renderWelcome(colorsEnabled())
-      : renderHuman(result, colorsEnabled());
+      : result.name === "hafi" ? renderWelcome(colors)
+      : renderHuman(result, colors);
     process.stdout.write(`${rendered}\n`);
     return failure ? exitCodes[failure] : 0;
   } catch (error) {

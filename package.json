@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.56.1",
+    "boxen": "^9.0.0",
     "googleapis": "^163.0.0",
+    "picocolors": "^1.1.1",
     "zod": "^4.1.0"
   },
   "devDependencies": {
