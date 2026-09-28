@@ -88,7 +88,7 @@ async function authorizationCode(redirectUri: string): Promise<string> {
         return new Response("Authorization failed. You can close this tab.", { status: 400 });
       }
       resolveCode(code);
-      return new Response("Lark connected. You can close this tab.");
+      return new Response("Authorization received. Return to Hafi in your terminal to confirm the connection.");
     },
   });
   const authUrl = new URL(`${larkAccountsDomain}/open-apis/authen/v1/index`);

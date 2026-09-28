@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { workflowSchema } from "../src/workflow";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { initWorkflow, loadWorkflow, workflowSchema } from "../src/workflow";
 
 const valid = {
   version: 1,
@@ -17,5 +20,20 @@ describe("workflow v1", () => {
     expect(workflowSchema.safeParse({ ...valid, extra: true }).success).toBe(false);
     expect(workflowSchema.safeParse({ ...valid, sources: [valid.sources[0], valid.sources[0]] }).success).toBe(false);
     expect(workflowSchema.safeParse({ ...valid, schedule: { every_minutes: 7 } }).success).toBe(false);
+  });
+
+  test("onboarding writes both selected sources to one workflow", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "hafi-workflow-"));
+    try {
+      const path = join(dir, "hafi.yaml");
+      const sources = [
+        { provider: "gmail" as const, account: "personal" },
+        { provider: "lark" as const, account: "personal" },
+      ];
+      await initWorkflow(path, sources);
+      expect((await loadWorkflow(path)).sources).toEqual(sources);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

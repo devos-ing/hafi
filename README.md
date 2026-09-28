@@ -21,8 +21,7 @@ Hafi stores results locally. The first workflow does not send messages or notifi
 These commands describe the CLI under development. Provider integrations still need live account verification.
 
 ```text
-hafi init --source gmail --workflow hafi.yaml
-hafi connect gmail
+hafi onboard --workflow hafi.yaml
 hafi workflow validate hafi.yaml --json
 hafi run-once --workflow hafi.yaml --dry-run --json
 hafi run-once --workflow hafi.yaml --json
@@ -31,7 +30,7 @@ hafi status --workflow reply-review --json
 hafi schedule print --workflow hafi.yaml --platform cron
 ```
 
-The same connection and workflow commands support Lark. Codex or Claude Code can run the commands during onboarding; browser authorization remains a user step. System cron runs the one-shot command in the background. Hafi does not need a permanent daemon.
+Run `hafi onboard` in a terminal. Answer Yes or No for Gmail and Lark; Hafi opens the browser for each selected account and writes the workflow after authorization succeeds. For scripts, use `hafi init` and `hafi connect` separately. System cron runs the one-shot command in the background. Hafi does not need a permanent daemon.
 
 ## Docs
 
@@ -58,5 +57,9 @@ bun run build
 For machine-readable output through the script, use `bun run --silent dev help --json` to suppress Bun's script banner.
 
 Use `hafi connect jev` to store a Jev API key through local input. Gmail app setup uses `HAFI_GMAIL_CLIENT_ID` and `HAFI_GMAIL_CLIENT_SECRET`; Lark app setup uses `HAFI_LARK_APP_ID`, `HAFI_LARK_APP_SECRET`, and `HAFI_LARK_REDIRECT_URI`. User tokens are stored in the operating system credential store, not in workflow YAML. Keep the app credentials out of committed files.
+
+For Gmail, [enable the Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com) in the Google Cloud project that owns your OAuth client. Create a Google OAuth client with application type **Desktop app** in [Google Cloud Console](https://console.cloud.google.com/auth/clients), then set `HAFI_GMAIL_CLIENT_ID` and `HAFI_GMAIL_CLIENT_SECRET` from that same client. Hafi listens on `127.0.0.1` using a random available port for the browser callback, so a **Web application** OAuth client with a fixed authorized redirect URI will produce `redirect_uri_mismatch`. If you already created a Web application client, create a Desktop app client and use its new ID and secret before rerunning `hafi connect gmail`. Do not register a fixed redirect URI for the Desktop app client.
+
+While the Google OAuth app is in **Testing**, open [Google Auth Platform > Audience](https://console.cloud.google.com/auth/audience), add the exact Google account you will authorize under **Test users**, and use that account in the browser when running `hafi connect gmail`. Google otherwise shows `Error 403: access_denied` and says the app is available only to developer-approved testers. In Testing, Google expires this authorization and its refresh token after seven days, so reconnecting will be necessary for continued scheduled use.
 
 Lark's default chat listing returns groups. Its user-identity API also documents `types=p2p,group` for one-to-one and group chats; Hafi requests both. Live account permissions and coverage still need end-to-end verification. See the [Lark CLI API reference](https://github.com/larksuite/cli/blob/main/skills/lark-im/references/lark-im-chat-list.md).

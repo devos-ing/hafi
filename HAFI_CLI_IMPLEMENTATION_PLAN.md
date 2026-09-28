@@ -62,6 +62,7 @@ Add `package.json`, strict `tsconfig.json`, `.gitignore`, [example workflow](./h
 ## Commands in the first release
 
 ```text
+hafi onboard --workflow hafi.yaml
 hafi init --source gmail --workflow hafi.yaml
 hafi connect gmail
 hafi connect lark
@@ -75,7 +76,7 @@ hafi schedule print --workflow hafi.yaml --platform cron
 hafi help --json
 ```
 
-`init` writes the YAML template and reports missing setup. Users can remove either source from that file. Browser consent remains a user step even when a Codex or Claude Code IDE runs the command. `--dry-run` checks recent new items with Jev without advancing cursors or writing drafts.
+`onboard` asks whether to connect Gmail and Lark, checks the selected app settings, completes each browser authorization, and writes one YAML workflow with the selected sources. If neither is selected, it writes nothing. `init` and `connect` remain available for scripts. Browser consent remains a user step even when a Codex or Claude Code IDE runs the command. `--dry-run` checks recent new items with Jev without advancing cursors or writing drafts.
 
 `--json` writes one object to stdout; diagnostics go to stderr. Preserve stable exit codes for configuration, source, Jev, and action failures. `hafi help --json` describes argument shapes, side effects, and sensitive outputs so coding agents can call Hafi directly. `results` and `status` read local state; `run-once` writes a local draft when the workflow matches.
 
@@ -83,7 +84,7 @@ hafi help --json
 
 After the user downloads Hafi and puts the binary on their PATH, a coding IDE agent can follow this prompt:
 
-> Run `hafi help --json`. Create a Gmail or Lark workflow with `hafi init`, then run the matching `hafi connect` command. Let me complete browser authorization. Validate the YAML, run one dry-run, and show me the cron entry from `hafi schedule print`. Keep credentials out of the prompt and terminal transcript.
+> Run `hafi help --json`, then run `hafi onboard --workflow hafi.yaml` in my terminal. Let me choose Gmail and Lark and complete browser authorization. Validate the YAML, run one dry-run, and show me the cron entry from `hafi schedule print`. Keep credentials out of the prompt and terminal transcript.
 
 The agent needs no Hafi-specific plugin. OAuth and any secret entry remain local interactive steps. The same commands work when a person types them directly.
 

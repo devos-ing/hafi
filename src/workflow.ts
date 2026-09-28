@@ -75,10 +75,12 @@ export async function loadWorkflow(path: string): Promise<Workflow> {
   return workflowSchema.parse(raw);
 }
 
-/** Write a starter workflow using one connected-account alias. */
-export async function initWorkflow(path: string, provider: Provider, account: string): Promise<void> {
+/** Write a starter workflow for the selected connected accounts. */
+export async function initWorkflow(path: string, sources: SourceConfig[]): Promise<void> {
   const file = Bun.file(path);
   if (await file.exists()) throw new Error(`Workflow already exists: ${path}`);
-  const yaml = `version: 1\nid: reply-review\nsources:\n  - provider: ${provider}\n    account: ${JSON.stringify(account)}\nschedule:\n  every_minutes: 5\nfilter:\n  bot: jev\n  question: "Does this new message need a personal reply from me?"\n  match_at_or_above: 0.7\nactions:\n  - type: save_reply_draft\n    composer: codex\n    max_words: 120\n`;
+  if (!sources.length) throw new Error("Select at least one source");
+  const sourceYaml = sources.map(({ provider, account }) => `  - provider: ${provider}\n    account: ${JSON.stringify(account)}`).join("\n");
+  const yaml = `version: 1\nid: reply-review\nsources:\n${sourceYaml}\nschedule:\n  every_minutes: 5\nfilter:\n  bot: jev\n  question: "Does this new message need a personal reply from me?"\n  match_at_or_above: 0.7\nactions:\n  - type: save_reply_draft\n    composer: codex\n    max_words: 120\n`;
   await Bun.write(path, yaml);
 }

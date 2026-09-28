@@ -4,7 +4,8 @@ import picocolors from "picocolors";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { closeSync, chmodSync, mkdirSync, openSync } from "node:fs";
-import { connectGmail, createGmailSource } from "./gmail";
+import { createInterface, type Interface } from "node:readline/promises";
+import { connectGmail, createGmailSource, GmailConnectError } from "./gmail";
 import { connectLark, createLarkSource } from "./lark";
 import { runOnce } from "./core";
 import { openState, readSecret, writeSecret } from "./state";
@@ -13,6 +14,9 @@ import { initWorkflow, loadWorkflow, type Provider } from "./workflow";
 type Output = Record<string, unknown>;
 type Colors = ReturnType<typeof picocolors.createColors>;
 
+/** Mark an onboarding error whose message contains no provider response data. */
+class OnboardError extends Error {}
+
 const exitCodes: Record<string, number> = { CONFIG: 2, SOURCE: 3, JEV: 4, ACTION: 5, RUN_BUSY: 6, INTERNAL: 1 };
 
 const help = {
@@ -20,6 +24,7 @@ const help = {
   status: "development",
   commands: [
     { command: "init --source gmail|lark --workflow <file>", effect: "write workflow YAML" },
+    { command: "onboard --workflow <file>", effect: "choose Gmail and Lark, authorize them, then write workflow YAML" },
     { command: "connect gmail|lark|jev", effect: "store local credentials" },
     { command: "workflow validate <file>", effect: "read YAML only" },
     { command: "doctor --workflow <file>", effect: "check local prerequisites" },
@@ -96,6 +101,16 @@ function option(args: string[], flag: string, fallback?: string): string {
   return value;
 }
 
+/** Ask for an explicit provider choice, treating Enter as no. */
+async function askYesNo(rl: Interface, provider: "Gmail" | "Lark", signal: AbortSignal): Promise<boolean> {
+  while (true) {
+    const answer = (await rl.question(`Connect ${provider}? [y/N] `, { signal })).trim().toLowerCase();
+    if (answer === "y" || answer === "yes") return true;
+    if (answer === "" || answer === "n" || answer === "no") return false;
+    process.stderr.write("Enter y or n.\n");
+  }
+}
+
 /** Quote an absolute path for a POSIX cron command. */
 function quote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -157,8 +172,43 @@ export async function command(args: string[]): Promise<Output> {
     const provider = option(commandArgs, "--source") as Provider;
     if (provider !== "gmail" && provider !== "lark") throw new Error("Unsupported source");
     const path = option(commandArgs, "--workflow");
-    await initWorkflow(path, provider, "personal");
+    await initWorkflow(path, [{ provider, account: "personal" }]);
     return { ok: true, workflow: resolve(path), next: `hafi connect ${provider}` };
+  }
+  if (name === "onboard") {
+    const path = option(commandArgs, "--workflow");
+    if (await Bun.file(path).exists()) throw new Error(`Workflow already exists: ${path}`);
+    if (!process.stdin.isTTY) throw new Error("Onboarding requires an interactive terminal; use init and connect for scripts.");
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    const abort = new AbortController();
+    rl.on("SIGINT", () => abort.abort());
+    let sources: Array<{ provider: Provider; account: string }>;
+    try {
+      const gmail = await askYesNo(rl, "Gmail", abort.signal);
+      const lark = await askYesNo(rl, "Lark", abort.signal);
+      sources = [
+        ...(gmail ? [{ provider: "gmail" as const, account: "personal" }] : []),
+        ...(lark ? [{ provider: "lark" as const, account: "personal" }] : []),
+      ];
+    } catch {
+      throw new Error("Onboarding cancelled.");
+    } finally {
+      rl.close();
+    }
+    if (!sources.length) return { ok: true, sources: [], created: false };
+    const needed = sources.flatMap(({ provider }) => provider === "gmail"
+      ? ["HAFI_GMAIL_CLIENT_ID", "HAFI_GMAIL_CLIENT_SECRET"]
+      : ["HAFI_LARK_APP_ID", "HAFI_LARK_APP_SECRET", "HAFI_LARK_REDIRECT_URI"]);
+    const missing = needed.filter((key) => !process.env[key]);
+    if (missing.length) throw new Error(`Set ${missing.join(", ")} before onboarding.`);
+    for (const source of sources) {
+      if (source.provider === "gmail") await connectGmail(source.account);
+      else await connectLark(source.account).catch(() => {
+        throw new OnboardError("Lark connection failed. Check the Lark app's OAuth redirect URL and user permissions, then try hafi connect lark.");
+      });
+    }
+    await initWorkflow(path, sources);
+    return { ok: true, workflow: resolve(path), sources, next: "hafi connect jev" };
   }
   if (name === "connect") {
     if (subcommand === "gmail") return await connectGmail(option(commandArgs, "--account", "personal"));
@@ -229,7 +279,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     const message = error instanceof Error ? error.message : "Unknown error";
     const code = classifyFailure(message);
     if (json) process.stdout.write(`${JSON.stringify({ ok: false, code })}\n`);
-    else process.stderr.write(`Hafi ${code}: ${code === "CONFIG" ? safeDisplay(message) : "Run failed; check hafi status for a safe error code."}\n`);
+    else process.stderr.write(`Hafi ${code}: ${code === "CONFIG" || error instanceof GmailConnectError || error instanceof OnboardError ? safeDisplay(message) : "Run failed; check hafi status for a safe error code."}\n`);
     return exitCodes[code];
   }
 }
@@ -237,7 +287,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 /** Map known failure prefixes to stable CLI exit categories without printing provider details. */
 function classifyFailure(message: string): keyof typeof exitCodes {
   if (message in exitCodes) return message;
-  if (/Missing|Unsupported|Unknown|already exists|invalid|NOT_CONFIGURED|^Set HAFI_|not connected/i.test(message)) return "CONFIG";
+  if (/Missing|Unsupported|Unknown|already exists|invalid|NOT_CONFIGURED|^Set HAFI_|not connected|Onboarding/i.test(message)) return "CONFIG";
   if (/RUN_BUSY|busy/i.test(message)) return "RUN_BUSY";
   if (/^JEV_/i.test(message)) return "JEV";
   if (/^CODEX_|^ACTION_/i.test(message)) return "ACTION";

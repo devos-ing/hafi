@@ -1,13 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { CodeChallengeMethod } from "google-auth-library";
 import { google } from "googleapis";
+import { z } from "zod";
 import { readSecret, writeSecret } from "./state";
 import type { InboxItem, InboxSource, MessageRef } from "./workflow";
 
 const gmailReadonly = "https://www.googleapis.com/auth/gmail.readonly";
 const secretPrefix = "hafi:gmail:";
+const gmailApiFailureSchema = z.object({
+  response: z.object({ data: z.object({ error: z.object({ errors: z.array(z.object({ reason: z.string() })) }) }) }),
+});
 
 type GmailCredentials = { refreshToken: string; email: string; clientId: string; clientSecret: string };
+
+/** Mark a Gmail connection failure whose message is safe to show in the terminal. */
+export class GmailConnectError extends Error {}
 type GmailCursor = { version: 1; historyId: string; lastSuccessAt: number };
 type GmailMessage = {
   id?: string | null;
@@ -59,17 +66,17 @@ async function getAuthorizationCode(clientId: string, clientSecret: string): Pro
       const url = new URL(request.url);
       if (url.pathname !== "/oauth2callback") return new Response("Not found", { status: 404 });
       if (url.searchParams.get("state") !== state) {
-        rejectCode(new Error("Gmail authorization returned an invalid state."));
+        rejectCode(new GmailConnectError("Gmail authorization returned an invalid state. Try connecting again."));
         return new Response("Authorization state did not match. You can close this tab.", { status: 400 });
       }
       const error = url.searchParams.get("error");
       const code = url.searchParams.get("code");
       if (error || !code) {
-        rejectCode(new Error(`Gmail authorization failed${error ? `: ${error}` : "."}`));
+        rejectCode(new GmailConnectError("Google did not authorize Gmail access. Try connecting again."));
         return new Response("Authorization failed. You can close this tab.", { status: 400 });
       }
       resolveCode(code);
-      return new Response("Gmail connected. You can close this tab.");
+      return new Response("Authorization received. Return to Hafi in your terminal to confirm the connection.");
     },
   });
   const redirectUri = `http://127.0.0.1:${server.port}/oauth2callback`;
@@ -84,16 +91,20 @@ async function getAuthorizationCode(clientId: string, clientSecret: string): Pro
     code_challenge_method: CodeChallengeMethod.S256,
   });
   console.error("Opening your browser to authorize read-only Gmail access.");
+  console.error("If Google shows redirect_uri_mismatch, use an OAuth client of type Desktop app for HAFI_GMAIL_CLIENT_ID and HAFI_GMAIL_CLIENT_SECRET.");
+  console.error("If Google says Hafi is being tested, add your Gmail address under Google Auth Platform > Audience > Test users.");
   openUrl(url);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const code = await Promise.race([
       codePromise,
       new Promise<string>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Gmail authorization timed out after five minutes.")), 5 * 60_000);
+        timer = setTimeout(() => reject(new GmailConnectError("Gmail authorization timed out after five minutes. Try connecting again.")), 5 * 60_000);
       }),
     ]);
-    const { tokens } = await oauth.getToken({ code, codeVerifier: pkce.codeVerifier });
+    const { tokens } = await oauth.getToken({ code, codeVerifier: pkce.codeVerifier }).catch(() => {
+      throw new GmailConnectError("Google rejected the Gmail token exchange. Check that the client ID and secret belong to the same Desktop app OAuth client, then try again.");
+    });
     oauth.setCredentials(tokens);
     return oauth;
   } finally {
@@ -201,11 +212,19 @@ export async function connectGmail(account: string): Promise<{ provider: "gmail"
   const clientSecret = requiredEnv("HAFI_GMAIL_CLIENT_SECRET");
   const oauth = await getAuthorizationCode(clientId, clientSecret);
   const gmail = google.gmail({ version: "v1", auth: oauth });
-  const profile = (await gmail.users.getProfile({ userId: "me" })).data;
-  if (!profile.emailAddress) throw new Error("Gmail did not return the authorized account address.");
+  const profile = (await gmail.users.getProfile({ userId: "me" }).catch((error: unknown) => {
+    const parsed = gmailApiFailureSchema.safeParse(error);
+    if (parsed.success && parsed.data.response.data.error.errors.some(({ reason }) => reason === "accessNotConfigured")) {
+      throw new GmailConnectError("The Gmail API is disabled for this OAuth client's Google Cloud project. Enable Gmail API in Google Cloud Console, then connect again.");
+    }
+    throw new GmailConnectError("Gmail profile check failed after authorization. Check that the Gmail API is enabled for this Google Cloud project and try again.");
+  })).data;
+  if (!profile.emailAddress) throw new GmailConnectError("Gmail did not return the authorized account address. Try connecting again.");
   const refreshToken = oauth.credentials.refresh_token;
-  if (!refreshToken) throw new Error("Gmail did not return a refresh token. Revoke Hafi's access and connect again.");
-  await writeSecret(secretName(account), JSON.stringify({ refreshToken, email: profile.emailAddress, clientId, clientSecret } satisfies GmailCredentials));
+  if (!refreshToken) throw new GmailConnectError("Gmail did not return a refresh token. Revoke Hafi's access and connect again.");
+  await writeSecret(secretName(account), JSON.stringify({ refreshToken, email: profile.emailAddress, clientId, clientSecret } satisfies GmailCredentials)).catch(() => {
+    throw new GmailConnectError("Gmail access was authorized, but saving its credentials in the OS credential store failed.");
+  });
   return { provider: "gmail", account, connected: true };
 }
 
