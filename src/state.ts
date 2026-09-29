@@ -75,6 +75,36 @@ export type WorkflowStatus = {
   lastErrorCode: string | null;
 };
 
+/** A lightweight operational snapshot for an IDE agent to explain recent workflow activity. */
+export type WorkflowSummary = {
+  workflowId: string;
+  latestRun: (RunSummary & { successful: boolean }) | null;
+  lastSuccess: number | null;
+  current: {
+    queued: number;
+    retry: number;
+    retryByError: Array<{ errorCode: string | null; count: number }>;
+  };
+  lifetime: {
+    workItems: number;
+    completed: number;
+    skipped: number;
+    skippedByReason: Array<{ reason: string | null; count: number }>;
+    drafts: number;
+  };
+  recentOutcomes: Array<{
+    provider: string;
+    account: string;
+    messageId: string;
+    conversationId: string;
+    status: WorkStatus;
+    skipReason: string | null;
+    errorCode: string | null;
+    attempts: number;
+    updatedAt: number;
+  }>;
+};
+
 /** The state contract used by the workflow runner and read-only CLI commands. */
 export interface State {
   /** Read the last committed cursor for one workflow and connected account. */
@@ -91,6 +121,8 @@ export interface State {
   retryWork(work: readonly WorkItem[], errorCode: string): void;
   /** Return workflow counts, recent run health, and the latest safe error code. */
   status(workflowId: string): WorkflowStatus;
+  /** Return read-only run, queue, lifetime, and recent outcome details without message content. */
+  summary(workflowId: string): WorkflowSummary;
   /** Return the most recent local drafts for review. */
   results(workflowId: string): DraftResultRecord[];
   /** Record one run summary without storing provider message bodies or secrets. */
@@ -367,6 +399,78 @@ export function openState(dataDir = join(homedir(), ".local", "share", "hafi")):
         lastRun: latest ? JSON.parse(latest.summary_json) as RunSummary : null,
         lastSuccess: success?.finished_at ?? null,
         lastErrorCode: latest?.error_code ?? latestWorkError,
+      };
+    },
+    summary(workflowId) {
+      const counts = db.query<{ status: WorkStatus; count: number }, [string]>(
+        "SELECT status, COUNT(*) AS count FROM work_items WHERE workflow_id = ? GROUP BY status",
+      ).all(workflowId);
+      const byStatus = new Map(counts.map((row) => [row.status, Number(row.count)]));
+      const latestRun = db.query<{
+        summary_json: string;
+        successful: number;
+      }, [string]>(`
+        SELECT summary_json, successful FROM run_history
+        WHERE workflow_id = ? ORDER BY finished_at DESC, id DESC LIMIT 1
+      `).get(workflowId);
+      const lastSuccess = db.query<{ finished_at: number | null }, [string]>(
+        "SELECT MAX(finished_at) AS finished_at FROM run_history WHERE workflow_id = ? AND successful = 1",
+      ).get(workflowId)?.finished_at ?? null;
+      const retryByError = db.query<{ error_code: string | null; count: number }, [string]>(`
+        SELECT error_code, COUNT(*) AS count FROM work_items
+        WHERE workflow_id = ? AND status = 'retry' GROUP BY error_code ORDER BY error_code
+      `).all(workflowId);
+      const skippedByReason = db.query<{ skip_reason: string | null; count: number }, [string]>(`
+        SELECT skip_reason, COUNT(*) AS count FROM work_items
+        WHERE workflow_id = ? AND status = 'skipped' GROUP BY skip_reason ORDER BY skip_reason
+      `).all(workflowId);
+      const workItems = Number(db.query<{ count: number }, [string]>(
+        "SELECT COUNT(*) AS count FROM work_items WHERE workflow_id = ?",
+      ).get(workflowId)?.count ?? 0);
+      const drafts = Number(db.query<{ count: number }, [string]>(
+        "SELECT COUNT(*) AS count FROM draft_results WHERE workflow_id = ?",
+      ).get(workflowId)?.count ?? 0);
+      const recentOutcomes = db.query<{
+        provider: string;
+        account: string;
+        message_id: string;
+        ref_json: string;
+        status: WorkStatus;
+        skip_reason: string | null;
+        error_code: string | null;
+        attempts: number;
+        updated_at: number;
+      }, [string]>(`
+        SELECT provider, account, message_id, ref_json, status, skip_reason, error_code, attempts, updated_at
+        FROM work_items WHERE workflow_id = ? ORDER BY updated_at DESC, id DESC LIMIT ${RESULT_LIMIT}
+      `).all(workflowId);
+      return {
+        workflowId,
+        latestRun: latestRun ? { ...JSON.parse(latestRun.summary_json) as RunSummary, successful: Boolean(latestRun.successful) } : null,
+        lastSuccess,
+        current: {
+          queued: byStatus.get("queued") ?? 0,
+          retry: byStatus.get("retry") ?? 0,
+          retryByError: retryByError.map(({ error_code, count }) => ({ errorCode: error_code, count: Number(count) })),
+        },
+        lifetime: {
+          workItems,
+          completed: byStatus.get("done") ?? 0,
+          skipped: byStatus.get("skipped") ?? 0,
+          skippedByReason: skippedByReason.map(({ skip_reason, count }) => ({ reason: skip_reason, count: Number(count) })),
+          drafts,
+        },
+        recentOutcomes: recentOutcomes.map((row) => ({
+          provider: row.provider,
+          account: row.account,
+          messageId: row.message_id,
+          conversationId: (JSON.parse(row.ref_json) as MessageRef).conversationId,
+          status: row.status,
+          skipReason: row.skip_reason,
+          errorCode: row.error_code,
+          attempts: row.attempts,
+          updatedAt: row.updated_at,
+        })),
       };
     },
     results(workflowId) {

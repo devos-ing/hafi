@@ -32,6 +32,7 @@ const help = {
     { command: "run-once --workflow <file> [--dry-run]", effect: "read inbox; normal run may save a local draft" },
     { command: "results --workflow <id>", effect: "read local draft results; sensitive output" },
     { command: "status --workflow <id>", effect: "read local run status" },
+    { command: "summary --workflow <id>", effect: "read local run and message-reference summary; sensitive output" },
     { command: "schedule print --workflow <file> --platform cron", effect: "prepare a private log and print a cron entry; does not install it" },
   ],
 };
@@ -68,6 +69,24 @@ function renderHuman(result: Output, colors: Colors): string {
     });
   };
   return fields(result, 0).join("\n");
+}
+
+/** Keep the default summary readable while JSON retains the complete bounded outcome list. */
+function renderHumanSummary(result: Output, colors: Colors): string {
+  const { recentOutcomes, ...overview } = result;
+  const outcomes = Array.isArray(recentOutcomes)
+    ? recentOutcomes.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    : [];
+  const sample = outcomes.slice(0, 10).map((item) => {
+    const value = (key: string) => safeDisplay(item[key] ?? "none");
+    return `- ${value("provider")}/${value("account")} message=${value("messageId")} conversation=${value("conversationId")} status=${value("status")} skip=${value("skipReason")} error=${value("errorCode")}`;
+  });
+  return [
+    renderHuman(overview, colors),
+    colors.bold(`Recent Outcomes (${outcomes.length})`),
+    ...(sample.length ? sample : ["none"]),
+    ...(outcomes.length > sample.length ? [`${outcomes.length - sample.length} more available in --json output`] : []),
+  ].join("\n");
 }
 
 /** Render a compact welcome block and command list for human help output. */
@@ -116,7 +135,7 @@ function quote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-/** Read a secret from redirected stdin or a terminal without echoing it. */
+/** Read a secret from redirected stdin or mask each terminal character. */
 async function readHiddenLine(): Promise<string> {
   if (!process.stdin.isTTY) return (await Bun.stdin.text()).trim();
   process.stderr.write("Jev API key: ");
@@ -137,8 +156,13 @@ async function readHiddenLine(): Promise<string> {
       for (const byte of chunk) {
         if (byte === 3) return finish(new Error("Cancelled"));
         if (byte === 10 || byte === 13) return finish();
-        if (byte === 127 || byte === 8) value = value.slice(0, -1);
-        else if (byte >= 32 && value.length < 4096) value += String.fromCharCode(byte);
+        if ((byte === 127 || byte === 8) && value.length) {
+          value = value.slice(0, -1);
+          process.stderr.write("\b \b");
+        } else if (byte >= 32 && value.length < 4096) {
+          value += String.fromCharCode(byte);
+          process.stderr.write("*");
+        }
       }
     };
     input.on("data", onData);
@@ -245,11 +269,13 @@ export async function command(args: string[]): Promise<Output> {
   }
   if (name === "dev") return await runOnce(option(commandArgs, "--workflow"), { dryRun: true });
   if (name === "run-once") return await runOnce(option(commandArgs, "--workflow"), { dryRun: commandArgs.includes("--dry-run") });
-  if (name === "results" || name === "status") {
+  if (name === "results" || name === "status" || name === "summary") {
     const workflowId = option(commandArgs, "--workflow");
     const state = openState();
     try {
-      return name === "results" ? { workflow: workflowId, results: state.results(workflowId) } : { workflow: workflowId, status: state.status(workflowId) };
+      if (name === "results") return { workflow: workflowId, results: state.results(workflowId) };
+      if (name === "status") return { workflow: workflowId, status: state.status(workflowId) };
+      return state.summary(workflowId);
     } finally { state.close(); }
   }
   if (name === "schedule" && subcommand === "print") {
@@ -272,6 +298,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     const rendered = json ? JSON.stringify(result)
       : typeof result.cron === "string" ? result.cron
       : result.name === "hafi" ? renderWelcome(colors)
+      : Array.isArray(result.recentOutcomes) ? renderHumanSummary(result, colors)
       : renderHuman(result, colors);
     process.stdout.write(`${rendered}\n`);
     return failure ? exitCodes[failure] : 0;

@@ -8,7 +8,7 @@ Implementation finding: Lark's user-identity chat list documents `types=p2p,grou
 
 One downloadable local TypeScript and Bun CLI reads new messages from a connected Gmail or Lark account, asks Jev what needs a personal reply, runs the next action named in a YAML workflow, and saves the result locally. The first action generates a reply draft with the selected local Codex CLI. The user reviews it through Hafi or their Codex or Claude Code IDE and sends the reply in the original app.
 
-System cron starts `hafi run-once --workflow <file> --json` every five minutes. That scheduled one-shot process is the background worker; Hafi needs no permanent daemon. `hafi status --workflow <id> --json` shows whether the schedule has kept up. First release supports Gmail and Lark intake, one Jev filter, and the `save_reply_draft` action. It sends no message or notification. Claude as a runtime composer, native source drafts, automatic sending, and Web UI work follow after the live path works.
+System cron starts `hafi run-once --workflow <file> --json` every five minutes. That scheduled one-shot process is the background worker; Hafi needs no permanent daemon. `hafi status --workflow <id> --json` shows basic health, while `hafi summary --workflow <id> --json` gives Codex or Claude Code a read-only account of recent work and message references. First release supports Gmail and Lark intake, one Jev filter, and the `save_reply_draft` action. It sends no message or notification. Claude as a runtime composer, native source drafts, automatic sending, and Web UI work follow after the live path works.
 
 ## Small architecture
 
@@ -55,7 +55,7 @@ Keep the first implementation to these eight source files. Give each exported fu
 | `src/state.ts` | `queueAndAdvance()` | Insert message references and the new cursor in one SQLite transaction. |
 | `src/state.ts` | `saveDraftResult()` | Save one private reviewable draft and mark its work item complete. |
 | `src/state.ts` | `withRunLease()` | Prevent overlapping cron runs and renew the lease during slow calls. |
-| `src/state.ts` | `status()` and `results()` | Report local health and selected messages to the CLI or an IDE. |
+| `src/state.ts` | `status()`, `summary()`, and `results()` | Report local health, recent activity, and selected messages to the CLI or an IDE. |
 
 Add `package.json`, strict `tsconfig.json`, `.gitignore`, [example workflow](./hafi.workflow.example.yaml), and a short setup README. Keep the database, credentials, logs, and temporary Codex files outside the repository. The workspace currently has design notes only, so there are no existing project packages to reuse.
 
@@ -72,13 +72,14 @@ hafi run-once --workflow hafi.yaml --dry-run --json
 hafi run-once --workflow hafi.yaml --json
 hafi results --workflow reply-review --json
 hafi status --workflow reply-review --json
+hafi summary --workflow reply-review --json
 hafi schedule print --workflow hafi.yaml --platform cron
 hafi help --json
 ```
 
 `onboard` asks whether to connect Gmail and Lark, checks the selected app settings, completes each browser authorization, and writes one YAML workflow with the selected sources. If neither is selected, it writes nothing. `init` and `connect` remain available for scripts. Browser consent remains a user step even when a Codex or Claude Code IDE runs the command. `--dry-run` checks recent new items with Jev without advancing cursors or writing drafts.
 
-`--json` writes one object to stdout; diagnostics go to stderr. Preserve stable exit codes for configuration, source, Jev, and action failures. `hafi help --json` describes argument shapes, side effects, and sensitive outputs so coding agents can call Hafi directly. `results` and `status` read local state; `run-once` writes a local draft when the workflow matches.
+`--json` writes one object to stdout; diagnostics go to stderr. Preserve stable exit codes for configuration, source, Jev, and action failures. `hafi help --json` describes argument shapes, side effects, and sensitive outputs so coding agents can call Hafi directly. `results`, `status`, and `summary` read local state; `summary` returns the latest run, last success, current queue and retries, lifetime work and draft counts, and up to 100 recent message references without message or draft text. These local IDs and account aliases are private. `run-once` writes a local draft when the workflow matches.
 
 ### Onboarding through Codex or Claude Code
 
@@ -88,7 +89,7 @@ After the user downloads Hafi and puts the binary on their PATH, a coding IDE ag
 
 The agent needs no Hafi-specific plugin. OAuth and any secret entry remain local interactive steps. The same commands work when a person types them directly.
 
-Cron invokes the installed Hafi binary with `run-once --workflow <absolute-path> --json` every five minutes. `hafi schedule print` prints an entry with absolute binary, workflow, and log paths; the user or IDE agent installs it. A local job runs only while the computer is awake and credentials are available; `status` makes a stale last-success time visible. A launchd print option can follow. The installed Bun 1.3.8 has no `Bun.cron`, so use the operating system's cron without an npm scheduler package.
+Cron invokes the installed Hafi binary with `run-once --workflow <absolute-path> --json` every five minutes. `hafi schedule print` prints an entry with absolute binary, workflow, and log paths; the user or IDE agent installs it. The printed cron entry is not installed automatically, and Hafi does not run a permanent daemon. A local job runs only while the computer is awake and credentials are available; `status` and `summary` make a stale last-success time visible. A launchd print option can follow. The installed Bun 1.3.8 has no `Bun.cron`, so use the operating system's cron without an npm scheduler package.
 
 ## Download and reusable workflow
 

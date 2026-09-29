@@ -30,4 +30,10 @@ Jev evaluates new conversation state against `filter.question`. A score at or ab
 
 Hafi rejects unknown fields and action types. The YAML cannot run arbitrary commands, scripts, or remote includes. `hafi workflow validate <file> --json` checks the format before a scheduled run.
 
+## Check workflow activity
+
+`hafi summary --workflow <id> --json` reads SQLite only. It reports the latest run and last successful run, queued and retryable work, lifetime work and draft counts, skip and retry reasons, and up to 100 recent message references. It includes IDs and account aliases but no message bodies or draft text, so treat its output as private. Codex or Claude Code can read this JSON to explain what happened without polling Gmail or Lark.
+
+`summary` is a one-shot report. It does not run the workflow or install a schedule. `hafi schedule print` only prints a cron entry; the user or IDE agent installs that entry. Hafi has no persistent daemon. Each cron invocation runs `hafi run-once` and exits.
+
 See the [implementation plan](../HAFI_CLI_IMPLEMENTATION_PLAN.md) for the state model and build sequence.
